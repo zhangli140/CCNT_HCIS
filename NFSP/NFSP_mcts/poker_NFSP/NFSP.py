@@ -45,7 +45,7 @@ def getCard(data):
 
     rank_dict = {'2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, 'T': 8, 'J': 9, 'Q': 10, 'K': 11,
                  'A': 12}
-    suit_dict = {'s': 0, 'h': 1, 'd': 2, 'c': 3}
+    suit_dict = {'c': 0, 'd': 1, 'h': 2, 's': 3}         #
 
     card = np.zeros([7], np.int32)
     for i in range(0, len(c), 2):
@@ -255,15 +255,15 @@ class NFSP(object):
                                                                "state_card2")
 
                 with tf.variable_scope('current_q'):
-                    self.ops[i]['q_logits_s'] = self._build_inference(self.ops[i]['state_history_ph'],
+                    self.ops[i]['q_logits_s'], _ = self._build_inference(self.ops[i]['state_history_ph'],
                                                                       self.ops[i]['state_card_ph'])
 
                 with tf.variable_scope('old_q'):
-                    self.ops[i]['q_logits_s2_old'] = self._build_inference(self.ops[i]['state_history_ph2'],
+                    self.ops[i]['q_logits_s2_old'], _ = self._build_inference(self.ops[i]['state_history_ph2'],
                                                                            self.ops[i]['state_card_ph2'])
 
                 with tf.variable_scope('average_pi'):
-                    self.ops[i]['pi_logits_s'] = self._build_inference(self.ops[i]['state_history_ph'],
+                    self.ops[i]['pi_logits_s'], self.ops[i]['mcts_v'] = self._build_inference(self.ops[i]['state_history_ph'],
                                                                        self.ops[i]['state_card_ph'], softmax=True)
 
                 assign_ops = []
@@ -300,8 +300,8 @@ class NFSP(object):
 
         state_card = tf.cast(state_card_ph, tf.float32)
         state = tf.concat([state_card, state_history], axis=1)
-        logits = self._network(state, reuse, softmax)
-        return logits
+        logits, v = self._network(state, reuse, softmax)
+        return logits, v
 
     def _build_train(self, action, pi_logits_s, reward, terminal, q_logits_s, q_logits_s2_old, global_step):
         action = tf.cast(action, tf.int32)
@@ -346,9 +346,11 @@ class NFSP(object):
             dim = hiddens;
             hiddens = self.env.action_space
             logits = self._linear_layer(linear1, dim, hiddens)
+            v = self._linear_layer(linear1, dim, 1)
         if softmax:
             logits = tf.nn.softmax(logits)
-        return logits
+            v = tf.tanh(v)
+        return logits, v
 
     def choose_action(self, thread, position, state_history, state_card, reset_mcts, data):
         if np.random.rand() < self.flags.anticipatory:  # epsilon greedy
@@ -374,13 +376,13 @@ class NFSP(object):
             return action, 'avg'  # average
 
     def choose_action_avg(self, position, history, card):
-        prob = self.sess.run(self.ops[position]['pi_logits_s'],
+        prob, v = self.sess.run([self.ops[position]['pi_logits_s'], self.ops[position]['mcts_v']],
                              feed_dict={self.ops[position]['state_history_ph']: [history],
                                         self.ops[position]['state_card_ph']: [card]})
 
         # v ?
         # action = np.random.choice(self.env.action_space, p=prob[0])
-        return prob[0], v  # average
+        return prob[0], v[0]
 
     def play_game(self):
 

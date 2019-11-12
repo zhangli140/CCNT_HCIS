@@ -35,6 +35,17 @@ class MCTS():
         if n == 2:
             return 'f'
 
+    def randomCard(self, card):                  ###
+        random_card = np.zeros([2], np.int32)
+        random_card[0] = np.random.randint(1, 53)
+        while random_card[0] == card[0] or random_card[0] == card[1]:
+            random_card[0] = np.random.randint(1, 53)
+
+        random_card[1] = np.random.randint(1, 53)
+        while random_card[1] == card[0] or random_card[1] == card[1]:
+            random_card[1] = np.random.randint(1, 53)
+        return random_card
+
     def getActionProb(self, position, history, card, data, temp=1):
         """
         This function performs numMCTSSims simulations of MCTS starting from
@@ -47,7 +58,8 @@ class MCTS():
         data = data[:data.rfind(':')]
 
         for i in range(self.numMCTSSims):
-            self.search(position, history, card, data)
+            random_card = self.randomCard(card)
+            self.search(position, history, card, data, random_card)
 
         s = self.getStateRepresentation(position, history, card)
         counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.actionSize)]
@@ -77,7 +89,7 @@ class MCTS():
         pi = pi.tolist()
         return pi
 
-    def search(self, position, history, card, data):
+    def search(self, position, history, card, data, random_card):
         """
         This function performs one iteration of MCTS. It is recursively called
         till a leaf node is found. The action chosen at each node is one that
@@ -129,22 +141,31 @@ class MCTS():
         # change
         # for next player avg policy
         data += ':' + self.numToAction(a)
+        data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])  #
         next_position, next_history, next_card, next_data = self.game.query(data)
         
         if next_data[-1] == '%':
             # terminal node
-            v = -1  # for best player
+            score = next_data[next_data.rfind(':') + 1:-1]
+            score = 1 if score > 0.0 else -1
+            v = -score if next_position != position else score  # for best player
 
         else:
+            if next_position != position:
+                next_card[0] = random_card[0]
+                next_card[1] = random_card[1]
             pi = self.getAvgActionProb(next_position, next_history, next_card)
             next_a = np.random.choice(len(pi), p=pi)
             next_data += ':' + self.numToAction(next_a)
+            next_data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])  #
             next_position, next_history, next_card, next_data = self.game.query(next_data)
 
             if next_data[-1] == '%':
-                v = 1
+                score = next_data[next_data.rfind(':') + 1:-1]
+                score = 1 if score > 0.0 else -1
+                v = -score if next_position != position else score
             else:
-                v = self.search(next_position, next_history, next_card, next_data)
+                v = self.search(next_position, next_history, next_card, next_data, random_card)
 
         #####
         if (s, a) in self.Qsa:
