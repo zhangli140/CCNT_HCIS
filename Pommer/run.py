@@ -7,7 +7,8 @@ import torch
 from collections import defaultdict
 
 from pommerman import agents
-from sacd.sac import SAC
+from eda import trans_obs, compute_reward
+from ppo.ppo import PPO, Transition
 from tensorboardX import SummaryWriter
 from sacd.replay_memory import ReplayMemory
 
@@ -15,10 +16,9 @@ from sacd.replay_memory import ReplayMemory
 #   loss compute [discrete sac]
 #   reward reshaping
 #   for agents, act was a callback function.
-#   train/test need to be separated
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
-parser.add_argument('--env-name', default='PommeFFACompetition-v0',
+parser.add_argument('--env-name', default='OneVsOne-v0',
                     help='Pommerman Gym environment (default: PommeFFACompetition-v0)')
 parser.add_argument('--policy', default="Deterministic",
                     help='Policy Type: Gaussian | Deterministic (default: Deterministic)')
@@ -57,16 +57,15 @@ args = parser.parse_args()
 
 # Environment
 env = gym.make(args.env_name)
+
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
-print(env.action_space, env.observation_space)
 
 # Agent
-# TODO
-sac_agent = SAC(366, env.action_space, args)
-
-agent_list = [sac_agent, agents.SimpleAgent(), agents.SimpleAgent(), agents.SimpleAgent()]
+# sac_agent = SAC(366, env.action_space, args)
+ppo_agent = PPO(16, env.action_space.n)
+agent_list = [ppo_agent, agents.SimpleAgent()]  # , agents.SimpleAgent(), agents.SimpleAgent()]
 for idx, agent in enumerate(agent_list):
     assert isinstance(agent, agents.BaseAgent)
     agent.init_agent(idx, env.spec._kwargs['game_type'])
@@ -75,11 +74,12 @@ env.set_agents(agent_list)
 env.set_init_game_state(None)
 env.set_render_mode('human')
 env.max_episode_steps = 800
+
+print(env.action_space, env.observation_space)
+
 # TesnorboardX
-writer = SummaryWriter(logdir='runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-                                                            args.env_name,
-                                                            args.policy,
-                                                            "autotune" if args.automatic_entropy_tuning else ""))
+utc = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+writer = SummaryWriter(logdir=f'runs/{utc}_{ppo_agent.name}_{args.env_name}_{args.policy}')
 
 # Memory
 memory = ReplayMemory(args.replay_size)
@@ -88,7 +88,6 @@ memory = ReplayMemory(args.replay_size)
 # Training Loop
 def train():
     total_step = 0
-    updates = 0
     for episode in itertools.count(1):
         episode_reward = 0
         episode_step = 0
@@ -96,49 +95,44 @@ def train():
         state = env.reset()
         action_collect = defaultdict(int)
         while not done:
-            if len(memory) > args.batch_size:
-                # TODO should do this in a member function of sac_agent
-                # Number of updates per step in environment
-                for i in range(args.updates_per_step):
-                    # Update parameters of all the networks
-                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha \
-                        = sac_agent.update_parameters(memory, args.batch_size, updates)
+            # env.render()
+            actions = env.act(state)  # this will call all agents' agent.act() method
 
-                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                    writer.add_scalar('loss/policy', policy_loss, updates)
-                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
-                    updates += 1
-                    if updates % 10000 == 0:
-                        sac_agent.save_model('PommFFA', suffix=str(episode)+'_'+str(updates))
-
-            obs = sac_agent._translate_obs(state[0])
-            actions = env.act(state)  # this will call all four agents' agent.act()
             action_collect[actions[0]] += 1
+
             state_, rewards, done, _ = env.step(actions)  # this execute all four agents' action(if alive)
+
+            obs, _ = trans_obs(state[0])
+            obs_, _ = trans_obs(state_[0])
+            reward = compute_reward(state[0], state_[0], rewards)
+            trans = Transition(obs, actions[0], ppo_agent.action_prob, reward, obs_)
+            ppo_agent.store_transition(trans)
             # type(rewards) == list, in FFA, len(rewards) == 4, and OneVsOne, len == 2
 
             # not sac_agent.is_alive(or reward[0] is -1), our agent dies, FFA, end the episode
             if not env._agents[0].is_alive:
                 done = True
+
             episode_step += 1
             total_step += 1
-            episode_reward += rewards[0]
-            obs_ = sac_agent._translate_obs(state_[0])
+            episode_reward += reward
+            if done and len(ppo_agent.buffer) > args.batch_size:
+                # TODO should do this in a member function of sac_agent
+                ppo_agent.learn(memory, args.batch_size, writer=writer)
+                # Number of updates per step in environment
 
             # Ignore the "done" signal if it comes from hitting the time horizon.
             # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
             mask = 1. if episode_step == env.max_episode_steps else float(not done)
 
             # Append transition to memory, since sac is off-policy, can we use other agent's experience?
-            memory.push(obs, actions[0], rewards[0], obs_, mask)
+            # memory.push(obs, actions[0], rewards[0], obs_, mask)
             state = state_
 
         if total_step > args.num_steps:  # total train steps
             break
-        # info print
         writer.add_scalar('reward/train', episode_reward, episode)
+        # print some info
         print(f"Episode: {episode}, total steps: {total_step}, "
               f"episode steps: {episode_step}, reward: {round(episode_reward, 2)},"
               f" action: {dict(action_collect.items())}")
@@ -170,84 +164,3 @@ def eval(train_episode):
 train()
 env.close()
 
-# total_numsteps = 0
-# updates = 0
-#
-# for i_episode in itertools.count(1):
-#     episode_reward = 0
-#     episode_steps = 0
-#     done = False
-#     state = env.reset()
-#
-#     while not done:
-#         if args.start_steps > total_numsteps:
-#             action = env.action_space.sample()  # Sample random action
-#         else:
-#             action = sac_agent.select_action(state)  # Sample action from policy
-#
-#         if len(memory) > args.batch_size:
-#             # Number of updates per step in environment
-#             for i in range(args.updates_per_step):
-#                 # Update parameters of all the networks
-#                 critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha \
-#                     = sac_agent.update_parameters(memory, args.batch_size, updates)
-#
-#                 writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-#                 writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-#                 writer.add_scalar('loss/policy', policy_loss, updates)
-#                 writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-#                 writer.add_scalar('entropy_temprature/alpha', alpha, updates)
-#                 updates += 1
-#
-#         obs = sac_agent._translate_obs(state[0])
-#         actions = env.act(state)
-#         # actions[0] = action
-#         next_state, reward, done, _ = env.step(actions)  # Step
-#         if not env._agents[0].is_alive:  # early stop, FFA, When our agent dies, end game
-#             done = True
-#         episode_steps += 1
-#         total_numsteps += 1
-#         episode_reward += reward[0]
-#         obs_ = sac_agent._translate_obs(next_state[0])
-#         # Ignore the "done" signal if it comes from hitting the time horizon.
-#         # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
-#         mask = 1. if episode_steps == env.max_episode_steps else float(not done)
-#
-#         memory.push(obs, action, reward[0], obs_, mask)  # Append transition to memory
-#
-#         state = next_state
-#
-#     if total_numsteps > args.num_steps:
-#         break
-#
-#     writer.add_scalar('reward/train', episode_reward, i_episode)
-#     print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps,
-#                                                                                   episode_steps,
-#                                                                                   round(episode_reward, 2)))
-#
-#     if i_episode % 100 == 0 and args.eval:
-#         avg_reward = 0.
-#         episodes = 10
-#         for _ in range(episodes):
-#             state = env.reset()
-#             episode_reward = 0
-#             done = False
-#             while not done:
-#                 # action = sac_agent.act(state[0], action_space=None, eval=True)
-#                 actions = env.act(state)
-#                 next_state, reward, done, _ = env.step(actions)
-#                 if reward[0] == -1:
-#                     done = True
-#                 episode_reward += reward[0]
-#
-#                 state = next_state
-#             avg_reward += episode_reward
-#         avg_reward /= episodes
-#
-#         writer.add_scalar('avg_reward/test', avg_reward, i_episode)
-#
-#         print("----------------------------------------")
-#         print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
-#         print("----------------------------------------")
-#
-# env.close()

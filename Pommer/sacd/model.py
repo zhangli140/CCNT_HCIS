@@ -114,12 +114,12 @@ class DeterministicPolicy(nn.Module):
     def forward(self, state):
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
-        x = F.softmax(self.linear3(x), dim=1)
+        x = F.softmax(self.linear3(x), dim=1)  # Dim = 1
         return x
 
     def sample(self, state):
         action_prob = self.forward(state)
-        max_prob_action = torch.argmax(action_prob, dim=1) # .unsqueeze(0)  # TODO shape?
+        max_prob_action = torch.argmax(action_prob, dim=1)  # .unsqueeze(0)  # TODO shape?
         assert action_prob.size(1) == self.num_actions, "Actor output the wrong size"
         action_dist = torch.distributions.Categorical(action_prob)
         action = action_dist.sample().cpu()

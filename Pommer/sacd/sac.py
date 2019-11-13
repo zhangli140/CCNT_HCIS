@@ -33,8 +33,9 @@ class SAC(agents.BaseAgent):
         if self.policy_type != "Gaussian":
             # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
             if self.automatic_entropy_tuning:
-                self.target_entropy = -np.log((1.0 / action_space.n)) * 0.98
+                self.target_entropy = 0 - action_space.n
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+                self.alpha = self.log_alpha.detach().exp()
                 self.alpha_optim = Adam([self.log_alpha], lr=args.lr)
             self.policy = DeterministicPolicy(num_inputs, action_space.n, args.hidden_size, action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
@@ -45,10 +46,7 @@ class SAC(agents.BaseAgent):
             self.policy = GaussianPolicy(num_inputs, action_space.n, args.hidden_size, action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
-        self._character.__setattr__(self, 'update_parameters', self.update_parameters)
-
     def act(self, state, action_space, eval=False):
-        # print(hasattr(self._character, 'update_parameters'))
         # TODO discrete actions
         obs = self._translate_obs(state)
         state = torch.FloatTensor(obs).to(self.device).unsqueeze(0)
@@ -68,9 +66,11 @@ class SAC(agents.BaseAgent):
         :return:
         """
         # TODO same as policy.sample, where to put? which is better?
-        action_prob = self.policy(self._translate_obs(state))
+        # action_prob = self.policy(self._translate_obs(state))
+        a,b,c,d = state
+        action_prob = self.policy(torch.FloatTensor([a, b, c, d]))
         max_prob_action = torch.argmax(action_prob).unsqueeze(0)  # TODO shape?
-        assert action_prob.size(1) == self.action_space.n, "Actor output the wrong size"
+        # assert action_prob.size(1) == self.action_space.n, "Actor output the wrong size"
         action_dist = torch.distributions.Categorical(action_prob)
         action = action_dist.sample().cpu()
 
@@ -117,24 +117,29 @@ class SAC(agents.BaseAgent):
             board_cent, bbs_cent, bl_cent,
             o['blast_strength'], o['can_kick'], o['ammo']), axis=None)
 
-    def update_parameters(self, memory, batch_size, updates):
+    def learn(self, memory, batch_size, updates, writer=None):
         # Sample a batch
         state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=batch_size)
 
-        state_batch = torch.FloatTensor(state_batch).to(self.device)
-        next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
-        action_batch = torch.FloatTensor(action_batch).to(self.device)
-        reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
-        mask_batch = torch.FloatTensor(mask_batch).to(self.device).unsqueeze(1)
+        state_batch = torch.FloatTensor(state_batch).to(self.device)   # (batch_size, obs_spec)
+        next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)  # (batch_size, obs_spec)
+        action_batch = torch.FloatTensor(action_batch).to(self.device)   # (batch_size)
+
+        reward_batch = torch.FloatTensor(reward_batch).to(self.device)   # (batch_size)
+        mask_batch = torch.FloatTensor(mask_batch).to(self.device)      # (batch_size)
 
         with torch.no_grad():
-            _, (pi_, log_pi_), _ = self.policy.sample(next_state_batch)
+            next_actions, (pi_, log_pi_), _ = self.policy.sample(next_state_batch)
 
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch)
-            min_qf_next_target = pi_ * (torch.min(qf1_next_target, qf2_next_target) - self.alpha * log_pi_)
-            # TODO ? \mean_{a'} Q(s', a') Expected Q?
-            min_qf_next_target = min_qf_next_target.mean(dim=1).unsqueeze(-1)
-            next_q_value = reward_batch + (1 - mask_batch) * self.gamma * min_qf_next_target
+            log_pi_ = log_pi_.gather(dim=1, index=next_actions.view(-1, 1).long())
+            qf1_next_target = qf1_next_target.gather(dim=1, index=next_actions.view(-1, 1).long())  # (batch_size, 1)
+            qf2_next_target = qf2_next_target.gather(dim=1, index=next_actions.view(-1, 1).long())  # (batch_size, 1)
+            min_qf_next_target = (torch.min(qf1_next_target, qf2_next_target) - self.alpha * log_pi_)
+            # V(s) = Expected Q  = \sum_{a'} pi* Q(s', a') = \mean_{a'} Q(s', a')
+            # min_qf_next_target = min_qf_next_target.mean(dim=1)
+            next_q_value = reward_batch + (1 - mask_batch) * self.gamma * min_qf_next_target.view(-1)
+
         ###############################################################################
         # Critic losses
 
@@ -142,28 +147,31 @@ class SAC(agents.BaseAgent):
         qf1, qf2 = self.critic(state_batch)
         # (256, 6),  (256)
         # print(qf1.shape, action_batch.shape)
-        # TODO: UserWarning
-        #  Using a target size (torch.Size([256, 1])) that is different to the input size (torch.Size([256, 6])). This will likely lead to incorrect results due to broadcasting.
-        #  这里需要test一下正确性
         qf1 = qf1.gather(1, action_batch.view(-1, 1).long())   # 这里的action_batch 是 index
         qf2 = qf2.gather(1, action_batch.view(-1, 1).long())
 
-        qf1_loss = F.mse_loss(qf1, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
-        qf2_loss = F.mse_loss(qf2, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        qf1_loss = 0.5 * F.mse_loss(qf1.view(-1), next_q_value)
+        # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        qf2_loss = 0.5 * F.mse_loss(qf2.view(-1), next_q_value)
 
         ###############################################################################
         # Actor(Policy) losses
         action, (pi, log_pi), _ = self.policy.sample(state_batch)
         # pi, log_pi, _ = self.policy.sample(state_batch)
+        log_pi = log_pi.gather(dim=1, index=action.view(-1, 1).long()).view(-1)  # (batch_size,)
+        pi = pi.gather(dim=1, index=action.view(-1, 1).long()).view(-1)  # (batch_size,)
 
         qf1_pi, qf2_pi = self.critic(state_batch)
-        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        qf1_pi = qf1_pi.gather(dim=1, index=action.view(-1, 1).long())  # (batch_size, 1)
+        qf2_pi = qf2_pi.gather(dim=1, index=action.view(-1, 1).long())  # (batch_size, 1)
+        min_qf_pi = torch.min(qf1_pi.view(-1), qf2_pi.view(-1))
 
         # Jπ = 𝔼st∼D,εt∼N[α * log π(f(εt;st)|st) − Q(st,f(εt;st))]
         # TODO, discrete action
         #   Jπ = 𝔼st∼D,εt∼N[π * (α * log π(f(εt;st)|st) − Q(st,f(εt;st)))]
         policy_loss = (((self.alpha * log_pi) - min_qf_pi) * pi).mean()
-        log_pi = torch.sum(log_pi * pi, dim=1)  # used to calculate alpha loss, still don't understand
+        log_pi = torch.sum(log_pi * pi)  # used to calculate alpha loss, still don't understand
 
         ##############################################################################
         # optimize step
@@ -195,6 +203,12 @@ class SAC(agents.BaseAgent):
         if updates % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
+        if writer:
+            writer.add_scalar('loss/q1_loss', qf1_loss.item(), updates)
+            writer.add_scalar('loss/q2_loss', qf1_loss.item(), updates)
+            writer.add_scalar('loss/policy_loss', policy_loss.item(), updates)
+            writer.add_scalar('loss/alpha_loss', alpha_loss.item(), updates)
+            writer.add_scalar('loss/alpha', alpha_tlogs.item(), updates)
         return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_tlogs.item()
 
     # Save model parameters
