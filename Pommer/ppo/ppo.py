@@ -101,7 +101,7 @@ class PPO(BaseAgent):
         # update: don't need next_state
         # reward = torch.tensor([t.reward for t in self.buffer], dtype=torch.float).view(-1, 1)
         # next_state = torch.tensor([t.next_state for t in self.buffer], dtype=torch.float)
-        old_action_log_prob = torch.tensor([t.a_log_prob for t in self.buffer], dtype=torch.float).view(-1, 1)
+        old_action_prob = torch.tensor([t.a_log_prob for t in self.buffer], dtype=torch.float).view(-1, 1)
 
         R = 0
         Gt = []
@@ -124,12 +124,13 @@ class PPO(BaseAgent):
                 # epoch iteration, PPO core!!!
                 action_prob = self.actor_net(state[index]).gather(1, action[index])  # new policy
 
-                ratio = (action_prob / old_action_log_prob[index])
+                ratio = torch.exp(torch.log(action_prob) - torch.log(old_action_prob[index]))
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1 - self.clip_param, 1 + self.clip_param) * advantage
 
                 # update actor network
-                action_loss = -torch.min(surr1, surr2).mean()  # MAX->MIN desent
+                action_loss = -torch.min(surr1, surr2).mean()
+
                 writer.add_scalar('loss/action_loss', action_loss, global_step=self.training_step)
                 self.actor_optimizer.zero_grad()
                 action_loss.backward()

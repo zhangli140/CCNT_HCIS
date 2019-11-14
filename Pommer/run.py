@@ -117,9 +117,7 @@ def train():
             total_step += 1
             episode_reward += reward
             if done and len(ppo_agent.buffer) > args.batch_size:
-                # TODO should do this in a member function of sac_agent
                 ppo_agent.learn(memory, args.batch_size, writer=writer)
-                # Number of updates per step in environment
 
             # Ignore the "done" signal if it comes from hitting the time horizon.
             # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)

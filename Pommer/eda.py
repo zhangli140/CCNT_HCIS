@@ -72,7 +72,7 @@ def plot_reward():
     import pandas as pd
     import matplotlib.pyplot as plt
     data = pd.read_csv('run_reward.csv')
-    moving_mean = data['Value'].rolling(window=20).mean()
+    moving_mean = data['Value'].rolling(window=100).mean()
     plt.figure()
     plt.plot(np.arange(len(moving_mean)), moving_mean)
     plt.show()
