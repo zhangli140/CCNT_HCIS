@@ -19,6 +19,7 @@ Copyright (C) 2011 by the Computer Poker Research Group, University of Alberta
 #include "rng.h"
 #include "net.h"
 
+
 int main(int argc, char **argv)
 {
 	int sock, len, r, a;
@@ -166,8 +167,21 @@ int main(int argc, char **argv)
 		if (stateFinished(&state.state))    // 计算得分，然后直接发给player，不需再得到回应，也不需反馈给dealer
 		{
 			/* ignore the game over message */
-
-			value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
+			if (line[0] == 'Q')
+			{
+				int str_size = strlen(line);
+				if (state.state.holeCards[state.viewingPlayer][0] != (line[str_size - 11] - '0') * 10 + (line[str_size - 10] - '0'))
+				{
+					state.state.holeCards[state.viewingPlayer][0] = (line[str_size - 5] - '0') * 10 + (line[str_size - 4] - '0');
+					state.state.holeCards[state.viewingPlayer][1] = (line[str_size - 2] - '0') * 10 + (line[str_size - 1] - '0');
+					// python返回的card顺序定义与game.h中一致
+				}
+				value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
+			}
+			else
+			{
+				value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
+			}
 			line[len++] = ':';
 			len += sprintf(&line[len], "%lf", value[state.viewingPlayer]);        // 这句没问题
 			line[len++] = '%';
@@ -184,7 +198,7 @@ int main(int argc, char **argv)
 			{
 				goto continue_query;
 			}
-			
+
 			/*9月27日改动*/
 			if ((len = read(new_fd, line, MAX_LINE_LEN)) <= 0)                 //////
 			{
