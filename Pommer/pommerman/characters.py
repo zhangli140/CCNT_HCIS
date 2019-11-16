@@ -15,6 +15,7 @@ class Bomber(object):
         self.is_alive = True
         self.blast_strength = constants.DEFAULT_BLAST_STRENGTH
         self.can_kick = False
+        self.bonus = 0
         if agent_id is not None:
             self.set_agent_id(agent_id)
 
@@ -83,6 +84,7 @@ class Bomber(object):
 
     def pick_up(self, item, max_blast_strength):
         if item == constants.Item.ExtraBomb:
+            self.bonus = 0.01
             self.incr_ammo()
         elif item == constants.Item.IncrRange:
             self.blast_strength = min(self.blast_strength + 1,

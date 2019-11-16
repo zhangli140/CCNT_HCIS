@@ -226,8 +226,7 @@ class ForwardModel(object):
                     # Crossed another agent - revert both to prior positions.
                     desired_agent_positions[num_agent] = agent.position
                     num_agent2, _ = crossings[border]
-                    desired_agent_positions[num_agent2] = alive_agents[
-                        num_agent2].position
+                    desired_agent_positions[num_agent2] = alive_agents[num_agent2].position
                 else:
                     crossings[border] = (num_agent, True)
 
@@ -422,6 +421,7 @@ class ForwardModel(object):
             if desired_agent_positions[num_agent] != agent.position:
                 agent.move(actions[agent.agent_id])
                 if utility.position_is_powerup(curr_board, agent.position):
+                    # TODO pick_up should be rewarded
                     agent.pick_up(
                         constants.Item(curr_board[agent.position]),
                         max_blast_strength=max_blast_strength)
@@ -450,8 +450,7 @@ class ForwardModel(object):
                 bomb.bomber.incr_ammo()
                 for _, indices in bomb.explode().items():
                     for r, c in indices:
-                        if not all(
-                            [r >= 0, c >= 0, r < board_size, c < board_size]):
+                        if not all([r >= 0, c >= 0, r < board_size, c < board_size]):
                             break
                         if curr_board[r][c] == constants.Item.Rigid.value:
                             break
@@ -596,9 +595,7 @@ class ForwardModel(object):
                 if len(alive) != 1:
                     # Either we have more than 1 alive (reached max steps) or
                     # we have 0 alive (last agents died at the same time).
-                    return {
-                        'result': constants.Result.Tie,
-                    }
+                    return {'result': constants.Result.Tie, }
                 else:
                     return {
                         'result': constants.Result.Win,

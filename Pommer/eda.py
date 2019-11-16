@@ -1,6 +1,6 @@
 
 import numpy as np
-from obs_onebyone import obs
+from obs_1v1 import obs
 
 
 def trans_obs(obs):
@@ -17,18 +17,16 @@ def trans_obs(obs):
     return o, vec
 
 
-def compute_reward(obs, obs_, rewards):
+def compute_reward(obs, obs_, rewards, ammo_bonus):
     # compute reward
     reward = 0.
-    # todo
     # pick up kick 0.02
     if obs_['can_kick'] and not obs['can_kick']:
         reward += 0.02
     # blast strength 0.01
     reward += (obs_['blast_strength'] - obs['blast_strength']) * 0.01
     # pick up ammo 0.01
-    if obs_['ammo'] > obs['ammo']:  # drop a bomb will also cause this.
-        reward += 0.01
+    reward += ammo_bonus
     # draw 0/0
     return reward + rewards[0]
 
@@ -72,7 +70,9 @@ def plot_reward():
     import pandas as pd
     import matplotlib.pyplot as plt
     data = pd.read_csv('run_reward.csv')
+    print(len(data))
     moving_mean = data['Value'].rolling(window=100).mean()
+    print(len(moving_mean))
     plt.figure()
     plt.plot(np.arange(len(moving_mean)), moving_mean)
     plt.show()

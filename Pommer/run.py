@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import random
 import gym
 import numpy as np
 import itertools
@@ -9,13 +10,9 @@ from collections import defaultdict
 from pommerman import agents
 from eda import trans_obs, compute_reward
 from ppo.ppo import PPO, Transition
+from ppo.replay_memory import ReplayMemory
 from tensorboardX import SummaryWriter
-from sacd.replay_memory import ReplayMemory
 
-# TODO
-#   loss compute [discrete sac]
-#   reward reshaping
-#   for agents, act was a callback function.
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
 parser.add_argument('--env-name', default='OneVsOne-v0',
@@ -51,20 +48,22 @@ parser.add_argument('--target_update_interval', type=int, default=1, metavar='N'
                     help='Value target update per no. of updates per step (default: 1)')
 parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
-parser.add_argument('--cuda', action="store_true",
+parser.add_argument('--cuda', action="store_true", default=False,
                     help='run on CUDA (default: False)')
 args = parser.parse_args()
 
 # Environment
 env = gym.make(args.env_name)
 
+# random seed
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
+random.seed(args.seed)
 
 # Agent
-# sac_agent = SAC(366, env.action_space, args)
 ppo_agent = PPO(16, env.action_space.n)
+# 1v1, two agents
 agent_list = [ppo_agent, agents.SimpleAgent()]  # , agents.SimpleAgent(), agents.SimpleAgent()]
 for idx, agent in enumerate(agent_list):
     assert isinstance(agent, agents.BaseAgent)
@@ -96,44 +95,56 @@ def train():
         action_collect = defaultdict(int)
         while not done:
             # env.render()
-            actions = env.act(state)  # this will call all agents' agent.act() method
+
+            # this will call all agents' agent.act() method，
+            actions = env.act(state)
 
             action_collect[actions[0]] += 1
 
-            state_, rewards, done, _ = env.step(actions)  # this execute all four agents' action(if alive)
+            # env.step will execute all four agents' action(if alive), and return:
+            #   next state: see in obs.py/obs_1v1.py
+            #   rewards: type(rewards) == list, in FFA, len(rewards) == 4, and OneVsOne, len == 2
+            #   done: whether this episode finished or not
+            #   info: type(info) == dict, some extra info
+            state_, rewards, done, _ = env.step(actions)
 
+            # featurize state[0], feed into network
             obs, _ = trans_obs(state[0])
-            obs_, _ = trans_obs(state_[0])
-            reward = compute_reward(state[0], state_[0], rewards)
-            trans = Transition(obs, actions[0], ppo_agent.action_prob, reward, obs_)
+            # reward reshaping
+            reward = compute_reward(state[0], state_[0], rewards, agent._character.bonus)
+            agent._character.bonus = 0   # TODO this is a awful design, try to come up with sth. else.
+
+            # not agent.is_alive(or reward[0] is -1), our agent dies, FFA, end this episode
+            # or hit the time horizon.
+            done = done or not env._agents[0].is_alive or episode_step + 1 == env.max_episode_steps
+
+            # Ignore the "done" signal if it comes from hitting the time horizon.
+            # that is, when it's an artificial terminal signal that isn't based on
+            # the agent's state.
+            # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
+            mask = 1. if episode_step + 1 == env.max_episode_steps else float(not done)
+
+            # Append transition to memory, for off-policy methods, can we use other agent's experience?
+            # memory.push(obs, actions[0], ppo_agent.action_prob, reward, mask)
+
+            trans = Transition(obs, actions[0], ppo_agent.action_prob, reward)
             ppo_agent.store_transition(trans)
-            # type(rewards) == list, in FFA, len(rewards) == 4, and OneVsOne, len == 2
-
-            # not sac_agent.is_alive(or reward[0] is -1), our agent dies, FFA, end the episode
-            if not env._agents[0].is_alive:
-                done = True
-
             episode_step += 1
             total_step += 1
             episode_reward += reward
             if done and len(ppo_agent.buffer) > args.batch_size:
                 ppo_agent.learn(memory, args.batch_size, writer=writer)
 
-            # Ignore the "done" signal if it comes from hitting the time horizon.
-            # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
-            mask = 1. if episode_step == env.max_episode_steps else float(not done)
-
-            # Append transition to memory, since sac is off-policy, can we use other agent's experience?
-            # memory.push(obs, actions[0], rewards[0], obs_, mask)
             state = state_
 
-        if total_step > args.num_steps:  # total train steps
-            break
         writer.add_scalar('reward/train', episode_reward, episode)
         # print some info
-        print(f"Episode: {episode}, total steps: {total_step}, "
-              f"episode steps: {episode_step}, reward: {round(episode_reward, 2)},"
-              f" action: {dict(action_collect.items())}")
+        print(f"Episode: {episode}, total steps: {total_step}, episode steps: {episode_step},"
+              f" reward: {round(episode_reward, 2)}, action: {dict(action_collect.items())}")
+        # if total_step > args.num_steps:  # total train steps
+        #     break
+        if episode > 100000:
+            break
 
 
 def eval(train_episode):
