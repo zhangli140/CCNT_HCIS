@@ -42,8 +42,9 @@ class MCTS():
             random_card[0] = np.random.randint(1, 53)
 
         random_card[1] = np.random.randint(1, 53)
-        while random_card[1] == card[0] or random_card[1] == card[1]:
+        while random_card[1] == card[0] or random_card[1] == card[1] or random_card[1] == random_card[0]:
             random_card[1] = np.random.randint(1, 53)
+
         return random_card
 
     def getActionProb(self, position, history, card, data, temp=1):
@@ -59,7 +60,9 @@ class MCTS():
 
         for i in range(self.numMCTSSims):
             random_card = self.randomCard(card)
+            print("TEST 8")
             self.search(position, history, card, data, random_card)
+
 
         s = self.getStateRepresentation(position, history, card)
         counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.actionSize)]
@@ -113,6 +116,7 @@ class MCTS():
 
         if s not in self.Ps:       #never visited
             # leaf node
+            print("TEST 9")
             self.Ps[s], v = self.nnet.choose_action_avg(position, history, card)   # 0 1 2   c r f
 
             sum_Ps_s = np.sum(self.Ps[s])
@@ -120,7 +124,7 @@ class MCTS():
 
             self.Ns[s] = 0
             return v
-
+        print("TEST 10")
         cur_best = -float('inf')
         best_act = -1
 
@@ -137,37 +141,42 @@ class MCTS():
                 best_act = a
 
         a = best_act
-
+        print("TEST 11")
         # change
         # for next player avg policy
         data += ':' + self.numToAction(a)
-        data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])  #
+        data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])
         next_position, next_history, next_card, next_data = self.game.query(data)
-        
-        if next_data[-1] == '%':
-            # terminal node
-            score = next_data[next_data.rfind(':') + 1:-1]
-            score = 1 if score > 0.0 else -1
-            v = -score if next_position != position else score  # for best player
 
-        else:
-            if next_position != position:
-                next_card[0] = random_card[0]
-                next_card[1] = random_card[1]
-            pi = self.getAvgActionProb(next_position, next_history, next_card)
-            next_a = np.random.choice(len(pi), p=pi)
-            next_data += ':' + self.numToAction(next_a)
-            next_data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])  #
-            next_position, next_history, next_card, next_data = self.game.query(next_data)
-
+        while 1:
             if next_data[-1] == '%':
+                # terminal node
                 score = next_data[next_data.rfind(':') + 1:-1]
-                score = 1 if score > 0.0 else -1
-                v = -score if next_position != position else score
+                score = int(score[:score.find('.')])
+                score = 1 if score > 0 else -1
+                v = -score if next_position != position else score  # for best player
+                print("TEST 15")
+                break
             else:
-                v = self.search(next_position, next_history, next_card, next_data, random_card)
-
+                print("TEST 17")
+                if next_position == position:
+                    v = self.search(next_position, next_history, next_card, next_data, random_card)
+                    break                          ####
+                else:
+                    # next_card[0] = random_card[0]
+                    # next_card[1] = random_card[1]
+                    pi = self.getAvgActionProb(next_position, next_history, np.append(random_card, card[2:]))
+                    print("np.sum(pi):"+str(np.sum(pi)))
+                    print(pi)
+                    pi = pi/np.sum(pi)
+                    print("np.sum(pi):" + str(np.sum(pi)))
+                    print(pi)
+                    next_a = np.random.choice(len(pi), p=pi)
+                    next_data += ':' + self.numToAction(next_a)
+                    next_data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])
+                    next_position, next_history, next_card, next_data = self.game.query(next_data)
         #####
+
         if (s, a) in self.Qsa:
             self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
             self.Nsa[(s, a)] += 1
@@ -177,4 +186,5 @@ class MCTS():
             self.Nsa[(s, a)] = 1
 
         self.Ns[s] += 1
+        print("TEST 16")
         return v
