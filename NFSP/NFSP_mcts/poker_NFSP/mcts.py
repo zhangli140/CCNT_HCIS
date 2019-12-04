@@ -166,11 +166,11 @@ class MCTS():
                     # next_card[0] = random_card[0]
                     # next_card[1] = random_card[1]
                     pi = self.getAvgActionProb(next_position, next_history, np.append(random_card, card[2:]))
-                    print("np.sum(pi):"+str(np.sum(pi)))
-                    print(pi)
+                    # print("np.sum(pi):"+str(np.sum(pi)))
+                    # print(pi)
                     pi = pi/np.sum(pi)
-                    print("np.sum(pi):" + str(np.sum(pi)))
-                    print(pi)
+                    # print("np.sum(pi):" + str(np.sum(pi)))
+                    # print(pi)
                     next_a = np.random.choice(len(pi), p=pi)
                     next_data += ':' + self.numToAction(next_a)
                     next_data += '*' + ("%02d" % card[0]) + '*' + ("%02d" % card[1]) + '*' + ("%02d" % random_card[0]) + '*' + ("%02d" % random_card[1])

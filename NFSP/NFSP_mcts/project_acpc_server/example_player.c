@@ -35,6 +35,7 @@ int main(int argc, char **argv)
 	double actionProbs[NUM_ACTION_TYPES];
 	rng_state_t rng;
 	char line[MAX_LINE_LEN];
+	char new_line[400];
 
 
 	/* we make some assumptions about the actions - check them here */
@@ -216,6 +217,7 @@ int main(int argc, char **argv)
 		if (currentPlayer(game, &state.state) != state.viewingPlayer)         // '.'的运算符优先级>'&'
 		{
 			/* we're not acting */
+			fprintf(stderr, "不一致，退出\n");
 			continue;
 		}
 
@@ -338,12 +340,16 @@ int main(int argc, char **argv)
 			return -1;
 		}
 continue_query:
+		
+		memset(new_line, 0, 400);
+
 		fprintf(stderr, "TEST 1\n");
-		if ((len = read(new_fd, line, MAX_LINE_LEN)) <= 0)                 //////
+		if ((len = read(new_fd, new_line, 400)) <= 0)                 //////
 		{
 			fprintf(stderr, "ERROR: could not recv line from player\n");
 			return -1;
 		}
+		fprintf(stderr, "python传来的%s\n", new_line);
 		//fprintf(stderr, "len:%d\n", len);                      ###
 
 		// 收到的line以'\n'结束？https://blog.csdn.net/poetteaes/article/details/80160562 
@@ -351,7 +357,7 @@ continue_query:
 		/////////////////
 
 		fprintf(stderr, "TEST 2\n");
-		if (fwrite(line, 1, len, toServer) != len)
+		if (fwrite(new_line, 1, len, toServer) != len)
 		{
 
 			fprintf(stderr, "ERROR: could not get send response to server\n");

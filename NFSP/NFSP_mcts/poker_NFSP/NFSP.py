@@ -78,6 +78,7 @@ class myThread(threading.Thread):
         line = 'Q' + line
         line += '\r\n'
         print(line)
+        print(self.name)
         self.client.send(line.encode())
         print("TEST 13")
         response = ''
@@ -119,6 +120,7 @@ class myThread(threading.Thread):
                 recvData = self.client.recv(4096).decode('utf-8')
             # recvData = recvData.strip('\r\n')
             print("TEST 2")
+            print(self.name+'收到'+recvData)
             if recvData[-1] == '%':
                 next_start = True
                 # print(self.name + '收到结果消息:%s' % (recvData[:-1]))              #1
@@ -175,8 +177,8 @@ class myThread(threading.Thread):
                 myState = getState(recvData[recvData.rfind(':') + 4:], turn)
                 myCard = getCard(recvData[:recvData.rfind(':')])
                 myTurn = self.id - 1  ##
-                print("TEST 3")
-                action, tag = self.nfsp.choose_action(self, myTurn, myState, myCard, next_start, recvData)      # self
+                print(self.name+"TEST 3")
+                action, tag = self.nfsp.choose_action(self, myTurn, myState, myCard, True, recvData)      # self
                 next_start = False
                 print("TEST 4")
                 if tag == 'br':  # greedy best response
@@ -227,7 +229,7 @@ class myThread(threading.Thread):
             # 手动
 
             self.client.send(recvData.encode())
-            # print(self.name + '发送消息:%s\n' % (recvData[:-2]))          #1
+            print(self.name + '发送消息:%s\n' % (recvData[:-2]))          #1
 
         self.client.close()
 
@@ -367,7 +369,7 @@ class NFSP(object):
 
     def choose_action(self, thread, position, state_history, state_card, reset_mcts, data):
         if np.random.rand() < self.flags.anticipatory:  # epsilon greedy
-            print("TEST 5")
+            print(thread.name+"TEST 5")
             if np.random.rand() < self.epsilon:  # explore
                 action = np.random.randint(0, self.env.action_space)
             else:
@@ -380,6 +382,7 @@ class NFSP(object):
                 if reset_mcts:
                     self.my_mcts = MCTS(thread, self)
                     print("TEST 7")
+                # self.my_mcts.game.name = thread.name                                       ##12.3
                 pi = self.my_mcts.getActionProb(position, state_history, state_card, data)
                 print("TEST X")
                 action = np.random.choice(len(pi), p=pi)       # c r f  0 1 2
