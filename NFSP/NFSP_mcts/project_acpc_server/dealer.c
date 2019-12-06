@@ -317,7 +317,8 @@ static int readPlayerResponse(const Game *game,
 		// 10.29
 		if (line[0] == 'Q')
 		{
-			c = readMatchState(line+1, game, &tempState);
+			fprintf(stderr, "example_player发来的%s", line);
+			c = readMatchState(line + 1, game, &tempState);
 			if (c < 0)
 			{
 				/* couldn't get an intelligible state */
@@ -356,7 +357,7 @@ static int readPlayerResponse(const Game *game,
 			c += r;
 
 			/* make sure the action is valid */
-			if (!isValidAction(game, &tempState->state, 1, action))
+			if (!isValidAction(game, &(tempState.state), 1, action))
 			{
 
 				if (checkErrorInvalidAction(seat, errorInfo) < 0)
@@ -371,11 +372,23 @@ static int readPlayerResponse(const Game *game,
 				action->size = 0;
 			}
 doneRead_1:
-			doAction(game, action, &tempState->state);
-			tempState->viewingPlayer = currentPlayer(game, &tempState->state);
+			doAction(game, action, &(tempState.state));
+			tempState.viewingPlayer = currentPlayer(game, &(tempState.state));
 
 			/* prepare the message */
-			c = printMatchState(game, tempState, MAX_LINE_LEN, line);
+			//
+			char card[13];
+			for (int i = 0; i < 12; i++)
+			{
+				card[i] = line[c];
+				c++;
+			}
+			card[12] = '\0';
+
+			//
+
+			c = printMatchState(game, &tempState, MAX_LINE_LEN, line);
+			fprintf(stderr, "在printMatchState之后的line:%s", line);
 			if (c < 0 || c > MAX_LINE_LEN - 3)
 			{
 				/* message is too long */
@@ -383,17 +396,28 @@ doneRead_1:
 				fprintf(stderr, "123ERROR: state message too long\n");
 				return -1;
 			}
-			line[c] = '\r';
+			/*line[c] = '\r';
 			line[c + 1] = '\n';
 			line[c + 2] = 0;
+			c += 2;*/
+
+			char new_line[400];
+			memset(new_line, 0, 400);
+
+			strcat(new_line, "Q");
+			fprintf(stderr, "\n第1句%s", new_line);
+			strcat(new_line, line);
+			fprintf(stderr, "\n第2句%s", new_line);
+			strcat(new_line, card);
+			fprintf(stderr, "\n第3句%s", new_line);
+			c += 1 + 12;
+			new_line[c] = '\r';
+			new_line[c + 1] = '\n';
+			new_line[c + 2] = 0;
 			c += 2;
 
-			char new_line[MAX_LINE_LEN];
-			strcat(new_line, "Q");
-			strcat(new_line, line);
-			c += 1;
-
 			/* send it to the player and flush */
+			fprintf(stderr, "\n给example_player传回去的%s", new_line);
 			if (write(seatFD, new_line, c) != c)
 			{
 				/* couldn't send the line */

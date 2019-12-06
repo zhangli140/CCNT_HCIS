@@ -51,8 +51,8 @@ def getCard(data):
     for i in range(0, len(c), 2):
         rank = rank_dict[c[i]]
         suit = suit_dict[c[i + 1]]
-        card[int(i / 2)] = suit * 13 + rank + 1
-
+        # card[int(i / 2)] = suit * 13 + rank + 1
+        card[int(i / 2)] = rank*4+suit+1
     return card
 
 
@@ -74,17 +74,27 @@ class myThread(threading.Thread):
         self.client.connect(('192.168.25.128', self.port))  # 要填写服务器ip
 
     def query(self, line):
+        print("TEST 12")
         line = 'Q' + line
         line += '\r\n'
+        print(line)
+        print(self.name)
         self.client.send(line.encode())
+        print("TEST 13")
         response = ''
         while len(response) == 0:
             response = self.client.recv(4096).decode('utf-8')
 
+        print("TEST 14")
         if response[-1] == '%':
-            return 0, 0, 0, response
+            response = response[1:]
+            print("当前一句结束，query接收到的%s"%(response))
+            x = int(response[11])
+            myTurn = x if self.cnt % 2 == 0 else 1 - x
+            return myTurn, 0, 0, response
 
         response = response[1:]
+        print(response)
         turn = 0 if self.cnt % 2 == 0 else 1
         myState = getState(response[response.rfind(':') + 4:], turn)
         myCard = getCard(response[:response.rfind(':')])
@@ -103,12 +113,14 @@ class myThread(threading.Thread):
         while True:
 
             # print('准备接受服务器消息')
+            print("TEST 1")
             recvData = ''
             while len(recvData) == 0:
                 # print("666")
                 recvData = self.client.recv(4096).decode('utf-8')
             # recvData = recvData.strip('\r\n')
-
+            print("TEST 2")
+            print(self.name+'收到'+recvData)
             if recvData[-1] == '%':
                 next_start = True
                 # print(self.name + '收到结果消息:%s' % (recvData[:-1]))              #1
@@ -165,10 +177,10 @@ class myThread(threading.Thread):
                 myState = getState(recvData[recvData.rfind(':') + 4:], turn)
                 myCard = getCard(recvData[:recvData.rfind(':')])
                 myTurn = self.id - 1  ##
-
-                action, tag = self.nfsp.choose_action(self, myTurn, myState, myCard, next_start, recvData)      # self
+                print(self.name+"TEST 3")
+                action, tag = self.nfsp.choose_action(self, myTurn, myState, myCard, True, recvData)      # self
                 next_start = False
-
+                print("TEST 4")
                 if tag == 'br':  # greedy best response
                     self.nfsp.sl_replay[myTurn].add(myState, myCard, action)
                 self.nfsp.rl_replay[myTurn].add(myState, myCard, action, 0, False)
@@ -217,7 +229,7 @@ class myThread(threading.Thread):
             # 手动
 
             self.client.send(recvData.encode())
-            # print(self.name + '发送消息:%s\n' % (recvData[:-2]))          #1
+            print(self.name + '发送消息:%s\n' % (recvData[:-2]))          #1
 
         self.client.close()
 
@@ -232,6 +244,8 @@ class NFSP(object):
         self.epsilon = self.flags.epsilon
         self.sl_replay = [ReservoirReplay(flags, self.env), ReservoirReplay(flags, self.env)]
         self.rl_replay = [CircularReplay(flags, self.env), CircularReplay(flags, self.env)]
+
+        self.my_mcts = 0  ### 11.26
 
         tf_config = tf.ConfigProto(
             allow_soft_placement=True
@@ -346,6 +360,7 @@ class NFSP(object):
             dim = hiddens;
             hiddens = self.env.action_space
             logits = self._linear_layer(linear1, dim, hiddens)
+        with tf.variable_scope('linear3'):                            ##
             v = self._linear_layer(linear1, dim, 1)
         if softmax:
             logits = tf.nn.softmax(logits)
@@ -354,6 +369,7 @@ class NFSP(object):
 
     def choose_action(self, thread, position, state_history, state_card, reset_mcts, data):
         if np.random.rand() < self.flags.anticipatory:  # epsilon greedy
+            print(thread.name+"TEST 5")
             if np.random.rand() < self.epsilon:  # explore
                 action = np.random.randint(0, self.env.action_space)
             else:
@@ -361,9 +377,14 @@ class NFSP(object):
                 #                            feed_dict={self.ops[position]['state_history_ph']: [state_history],
                 #                                       self.ops[position]['state_card_ph']: [state_card]})
                 # action = np.argmax(q_logits_s[0])
+                print("TEST 6")
+
                 if reset_mcts:
-                    my_mcts = MCTS(thread, self)
-                pi = my_mcts.getActionProb(position, state_history, state_card, data)
+                    self.my_mcts = MCTS(thread, self)
+                    print("TEST 7")
+                # self.my_mcts.game.name = thread.name                                       ##12.3
+                pi = self.my_mcts.getActionProb(position, state_history, state_card, data)
+                print("TEST X")
                 action = np.random.choice(len(pi), p=pi)       # c r f  0 1 2
             return action, 'br'  # best response
         else:

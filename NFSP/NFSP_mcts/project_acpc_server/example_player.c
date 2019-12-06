@@ -35,6 +35,7 @@ int main(int argc, char **argv)
 	double actionProbs[NUM_ACTION_TYPES];
 	rng_state_t rng;
 	char line[MAX_LINE_LEN];
+	char new_line[400];
 
 
 	/* we make some assumptions about the actions - check them here */
@@ -140,6 +141,7 @@ int main(int argc, char **argv)
 	while (fgets(line, MAX_LINE_LEN, fromServer))
 	{
 
+		fprintf(stderr, "dealer返回的%s", line);
 		/* ignore comments */
 		if (line[0] == '#' || line[0] == ';')
 		{
@@ -150,6 +152,7 @@ int main(int argc, char **argv)
 		{
 			len = readMatchState(line + 1, game, &state);
 			len++;
+			fprintf(stderr, "TEST 10\n");
 		}
 		else
 		{
@@ -169,23 +172,24 @@ int main(int argc, char **argv)
 			/* ignore the game over message */
 			if (line[0] == 'Q')
 			{
+				fprintf(stderr, "TEST 11\n");
 				int str_size = strlen(line);
-				if (state.state.holeCards[state.viewingPlayer][0] != (line[str_size - 11] - '0') * 10 + (line[str_size - 10] - '0'))
+				//需要-1
+				if (state.state.holeCards[state.viewingPlayer][0] != (line[str_size - 13] - '0') * 10 + (line[str_size - 12] - '0') - 1)
 				{
-					state.state.holeCards[state.viewingPlayer][0] = (line[str_size - 5] - '0') * 10 + (line[str_size - 4] - '0');
-					state.state.holeCards[state.viewingPlayer][1] = (line[str_size - 2] - '0') * 10 + (line[str_size - 1] - '0');
+					state.state.holeCards[state.viewingPlayer][0] = (line[str_size - 7] - '0') * 10 + (line[str_size - 6] - '0') - 1;
+					state.state.holeCards[state.viewingPlayer][1] = (line[str_size - 4] - '0') * 10 + (line[str_size - 3] - '0') - 1;
 					// python返回的card顺序定义与game.h中一致
 				}
-				value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
 			}
-			else
-			{
-				value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
-			}
+
+			value[state.viewingPlayer] = valueOfState(game, &state.state, state.viewingPlayer);
+
 			line[len++] = ':';
 			len += sprintf(&line[len], "%lf", value[state.viewingPlayer]);        // 这句没问题
 			line[len++] = '%';
 
+			
 			if (write(new_fd, line, len) != len)
 			{
 				/* couldn't send the line */
@@ -193,7 +197,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "ERROR: could not send line to player\n");
 				return -1;
 			}
-
+			fprintf(stderr, "TEST 12\n");
 			if (line[0] == 'Q')
 			{
 				goto continue_query;
@@ -213,6 +217,7 @@ int main(int argc, char **argv)
 		if (currentPlayer(game, &state.state) != state.viewingPlayer)         // '.'的运算符优先级>'&'
 		{
 			/* we're not acting */
+			fprintf(stderr, "不一致，退出\n");
 			continue;
 		}
 
@@ -223,7 +228,7 @@ int main(int argc, char **argv)
 
 
 		/* add a colon (guaranteed to fit because we read a new-line in fgets) */
-		line[len] = ':';
+		line[len] = ':';                          // 
 		++len;
 
 		/* build the set of valid actions */
@@ -335,18 +340,24 @@ int main(int argc, char **argv)
 			return -1;
 		}
 continue_query:
-		if ((len = read(new_fd, line, MAX_LINE_LEN)) <= 0)                 //////
+		
+		memset(new_line, 0, 400);
+
+		fprintf(stderr, "TEST 1\n");
+		if ((len = read(new_fd, new_line, 400)) <= 0)                 //////
 		{
 			fprintf(stderr, "ERROR: could not recv line from player\n");
 			return -1;
 		}
+		fprintf(stderr, "python传来的%s\n", new_line);
 		//fprintf(stderr, "len:%d\n", len);                      ###
 
 		// 收到的line以'\n'结束？https://blog.csdn.net/poetteaes/article/details/80160562 
 
 		/////////////////
 
-		if (fwrite(line, 1, len, toServer) != len)
+		fprintf(stderr, "TEST 2\n");
+		if (fwrite(new_line, 1, len, toServer) != len)
 		{
 
 			fprintf(stderr, "ERROR: could not get send response to server\n");
