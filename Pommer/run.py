@@ -8,7 +8,7 @@ import torch
 from collections import defaultdict
 
 from pommerman import agents
-from eda import trans_obs, compute_reward
+from ppo.eda import trans_obs, compute_reward
 from ppo.ppo import PPO, Transition
 from ppo.replay_memory import ReplayMemory
 from tensorboardX import SummaryWriter
@@ -132,9 +132,9 @@ def train():
             episode_step += 1
             total_step += 1
             episode_reward += reward
-            if done and len(ppo_agent.buffer) > args.batch_size:
+            if done:
                 ppo_agent.learn(memory, args.batch_size, writer=writer)
-
+            del ppo_agent.buffer[:]
             state = state_
 
         writer.add_scalar('reward/train', episode_reward, episode)
@@ -143,7 +143,7 @@ def train():
               f" reward: {round(episode_reward, 2)}, action: {dict(action_collect.items())}")
         # if total_step > args.num_steps:  # total train steps
         #     break
-        if episode > 100000:
+        if episode > 1000000:
             break
 
 
