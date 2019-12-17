@@ -25,7 +25,7 @@ class BaseAgent:
         pass
 
     def init_agent(self, id_, game_type):
-        self._character = self._character(id_, game_type)
+        self._character = self._character(id_, game_type)  # characters.Bomber.__init__()
 
     @staticmethod
     def has_user_input():

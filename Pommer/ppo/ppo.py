@@ -12,9 +12,10 @@ import os
 from pommerman.agents import BaseAgent
 from eda import trans_obs
 from ppo.model import Actor, Critic
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-Transition = namedtuple('Transition', ['state', 'action', 'a_log_prob', 'reward', 'next_state'])
+Transition = namedtuple('Transition', ['state', 'action', 'a_log_prob', 'reward'])
 
 
 class PPO(BaseAgent):
@@ -37,17 +38,17 @@ class PPO(BaseAgent):
         self.buffer_capacity = buffer_capacity  # TODO we want a buffer outside this class
         self.batch_size = batch_size
 
-        self.actor_net = Actor(s_dim, a_dim, hidden_dim=256)
-        self.critic_net = Critic(s_dim, hidden_dim=256)
+        self.actor_net = Actor(s_dim, a_dim, hidden_dim=256).to(device)
+        self.critic_net = Critic(s_dim, hidden_dim=256).to(device)
         self.buffer = []
         self.counter = 0
         self.training_step = 0
 
-        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
-        self.critic_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
+        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), lr=1e-3)
+        self.critic_optimizer = optim.Adam(self.critic_net.parameters(), lr=3e-3)
 
     def select_action(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0)
+        state = torch.from_numpy(state).float().unsqueeze(0).to(device)
         with torch.no_grad():
             action_prob = self.actor_net(state)
         c = Categorical(action_prob)
@@ -64,7 +65,7 @@ class PPO(BaseAgent):
         return torch.tensor(a).long(), prob, a
 
     def get_value(self, state):
-        state = torch.from_numpy(state)
+        state = torch.from_numpy(state).to(device)
         with torch.no_grad():
             value = self.critic_net(state)
         return value.item()
@@ -112,17 +113,18 @@ class PPO(BaseAgent):
         Gt = torch.tensor(Gt, dtype=torch.float)
 
         for i in range(self.ppo_update_time):
-            for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, False):
+            for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, drop_last=False):
+                # 每次sample一个batch, 一次学习恰好sample完所有的transition
                 if self.training_step % 10000 == 0:
                     self.save_model('PommOneVsOne', suffix=str(self.training_step))
 
                 # with torch.no_grad():
                 Gt_index = Gt[index].view(-1, 1)
-                V = self.critic_net(state[index])
+                V = self.critic_net(state[index].to(device))
                 delta = Gt_index - V
                 advantage = delta.detach()
                 # epoch iteration, PPO core!!!
-                action_prob = self.actor_net(state[index]).gather(1, action[index])  # new policy
+                action_prob = self.actor_net(state[index].to(device)).gather(1, action[index])  # new policy
 
                 ratio = torch.exp(torch.log(action_prob) - torch.log(old_action_prob[index]))
                 surr1 = ratio * advantage
@@ -131,7 +133,7 @@ class PPO(BaseAgent):
                 # update actor network
                 action_loss = -torch.min(surr1, surr2).mean()
 
-                writer.add_scalar('loss/action_loss', action_loss, global_step=self.training_step)
+                writer.add_scalar('loss/action_loss', action_loss.item(), global_step=self.training_step)
                 self.actor_optimizer.zero_grad()
                 action_loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_net.parameters(), self.max_grad_norm)
@@ -139,7 +141,7 @@ class PPO(BaseAgent):
 
                 # update critic network
                 value_loss = F.mse_loss(Gt_index, V)
-                writer.add_scalar('loss/value_loss', value_loss, global_step=self.training_step)
+                writer.add_scalar('loss/value_loss', value_loss.item(), global_step=self.training_step)
                 self.critic_optimizer.zero_grad()
                 value_loss.backward()
                 nn.utils.clip_grad_norm_(self.critic_net.parameters(), self.max_grad_norm)

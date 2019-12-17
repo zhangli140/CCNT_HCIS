@@ -28,8 +28,8 @@ class Actor(nn.Module):
         x = F.relu(self.conv3(x))
         x = x.view(-1, 64)
         x = F.relu(self.fc1(x))
-        prob = F.softmax(self.fc2(x))
-        return prob
+        prob = F.softmax(self.fc2(x), dim=1)
+        return prob  # (batch_size, num_actions)
 
 
 class Critic(nn.Module):
