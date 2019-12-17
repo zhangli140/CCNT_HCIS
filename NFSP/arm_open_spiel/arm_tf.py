@@ -258,8 +258,8 @@ class ARM(rl_agent.AbstractAgent):
             # if self._step_counter % self._learn_every == 0:
             #     self._last_loss_value = self.learn()
 
-            if self._step_counter % self._update_target_network_every == 0:
-                self._session.run(self._update_target_network)
+            # if self._step_counter % self._update_target_network_every == 0:
+            #     self._session.run(self._update_target_network)
 
             if self._prev_timestep and add_transition_record:
                 # We may omit record adding here if it's done elsewhere.
@@ -271,6 +271,7 @@ class ARM(rl_agent.AbstractAgent):
                     # print("player: {}, step_counter: {}, loss: {}".format(self.player_id, self.step_counter, self._last_loss_value))
                     self._step_counter = 0
                     self._replay_buffer.clear()
+
                 self._prev_timestep = None
                 self._prev_action = None
                 return
@@ -304,12 +305,13 @@ class ARM(rl_agent.AbstractAgent):
         #     next_info_state=time_step.observations["info_state"][self.player_id][:],
         #     is_final_step=float(time_step.last()),
         #     legal_actions_mask=legal_actions_mask)
+        # print(time_step.last(), float(time_step.last()))
         self._replay_buffer.add(
             prev_time_step.observations["info_state"][self.player_id][:],
             time_step.observations["info_state"][self.player_id][:],
             prev_action,
             time_step.rewards[self.player_id],
-            float(time_step.last()),
+            time_step.last(),
             legal_actions_mask)
 
     def _create_target_network_update_op(self, q_network, target_q_network):
@@ -428,10 +430,12 @@ class ARM(rl_agent.AbstractAgent):
                     self._mb_est_rew_ph: mb_est_rew_w
                 })
 
+            self._session.run(self._update_target_network)
+
             cum_q_loss += q_loss
             cum_v_loss += v_loss
 
-            if (i_iter + 1) % (self.iteration / 10) == 0:
+            if (i_iter + 1) % (self.iteration / 10) == 0.:
                 # print loss
                 mean_v_loss = (cum_v_loss / int(self.iteration / 10))
                 mean_q_loss = (cum_q_loss / int(self.iteration / 10))
@@ -486,7 +490,7 @@ class ARM(rl_agent.AbstractAgent):
             # print("shape: {}".format(val_est))
             val_est_mb = tf.zeros_like(tar_v)
             print(nonzero_idx, val_est_mb, val_est)
-            val_est_mb = tf.tensor_scatter_nd_add(val_est_mb, nonzero_idx, val_est)  # Problem!!!!
+            val_est_mb = tf.tensor_scatter_nd_add(val_est_mb, nonzero_idx, val_est)
             t_v = t_v + val_est_mb
             t_q = t_q + val_est_mb
             return t_v, t_q
@@ -528,23 +532,15 @@ class ARM(rl_agent.AbstractAgent):
         return v, q, tar_v, tar_q
 
     def __compute_targets(self, sampled_indices):
-        first_batch = not self._step_counter
+        # first_batch = not self._step_counter
+        first_batch = self._step_counter
 
         # precompute all v and q target values
-        evs = tf.zeros([])
-        cfv = tf.zeros([])
-        if first_batch:
-            # q_plus = np.zeros(self._batch_size)  # problem?
-            n_step = self._n_step_ph
+        # evs = tf.zeros([])
+        # cfv = tf.zeros([])
+        zero = tf.constant(0, dtype=tf.int32)
 
-            v_tar = n_step
-            q_tar = n_step
-        else:
-            # compute q and v values of last iteration (problem)
-            # obs = info_state
-            # actions = actions
-            # q_values = self._session.run(
-            #     self._q_values, feed_dict={self._info_state_ph: obs})[0]  #maybe self._q_values is enough
+        def idx_nonezero_t():
             q_values = self._q_values
             # q_values_t = torch.from_numpy(q_values)
             q_evs = q_values[:, self._num_actions]
@@ -558,8 +554,8 @@ class ARM(rl_agent.AbstractAgent):
             # q_cfv_t = tf.diag_part(tf.matmul(q_cfv, tf.transpose(action_one_hot)))
             # print(mul_t)
             # q_cfv = tf.gather_nd(q_cfv, self._action_ph, batch_dims=1)  # problem
-            evs = evs + q_evs
-            cfv = cfv + q_cfv_t
+            evs = q_evs
+            cfv = q_cfv_t
             print(evs, cfv)
             # compute advantage value and clip to 0
             # print("In compute target_2: {}, {}".format(cfv, evs))
@@ -570,8 +566,29 @@ class ARM(rl_agent.AbstractAgent):
             q_plus = q_plus_t
             n_step = self._n_step_ph
 
-            v_tar = n_step
-            q_tar = q_plus * self.q_plus_weight + n_step
+            v_t = n_step
+            q_t = q_plus * self.q_plus_weight + n_step
+            return v_t, q_t
+
+        def idx_zero_t():
+            n_step = self._n_step_ph
+
+            v_t = n_step
+            q_t = n_step
+            return v_t, q_t
+
+        v_tar, q_tar = tf.cond(tf.equal(first_batch, zero), idx_zero_t, idx_nonezero_t)
+
+        # if first_batch:
+            # q_plus = np.zeros(self._batch_size)  # problem?
+
+        # else:
+            # compute q and v values of last iteration (problem)
+            # obs = info_state
+            # actions = actions
+            # q_values = self._session.run(
+            #     self._q_values, feed_dict={self._info_state_ph: obs})[0]  #maybe self._q_values is enough
+
 
         # print(sampled_indices)
         # n_step = self._replay_buffer.n_step[sampled_indices]  # problem
@@ -630,9 +647,12 @@ class ARM(rl_agent.AbstractAgent):
 
         expected_values = q_values[self._num_actions]  # index num_action is for value (different from original arm)
         cf_values = q_values[:self._num_actions]
+        # print(q_values)
+        # print("In action_policy: {}, {}, {}".format(expected_values, cf_values, cf_values - expected_values))
         action_values = np.clip(cf_values - expected_values, a_min=0, a_max=1e99999)
         # action_values = tf.clip_by_value(cf_values - expected_values, clip_value_min=0, clip_value_max=1e99999)
         legal_q_values = action_values[legal_actions]
+        # print(action_values, legal_q_values, legal_actions)
         q_values_sum = np.sum(legal_q_values)
         if q_values_sum:  # Not zero
             action_prob = legal_q_values / q_values_sum
@@ -644,7 +664,10 @@ class ARM(rl_agent.AbstractAgent):
             action_prob = np.ones(legal_q_values.shape)
             action_prob = action_prob / action_dim
             probabilities[legal_actions] = 1.0 / len(legal_actions)
-        action = legal_actions[np.argmax(action_prob)]  # problem: maybe legal_q_values is enough
+        # action = legal_actions[np.argmax(action_prob)]  # problem: maybe legal_q_values is enough
+        chosed_legal_action = np.random.choice(range(action_prob.shape[0]), p=action_prob.ravel())
+        action = legal_actions[chosed_legal_action]
+        # print(action, action_prob, probabilities, chosed_legal_action)
         return action, probabilities
 
     def temp_mode_as(self, mode):
